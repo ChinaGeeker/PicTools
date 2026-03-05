@@ -9,8 +9,28 @@ const app = express();
 // 配置静态文件目录
 app.use(express.static('public'));
 
+// 启用CORS
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
+
 // 获取临时目录路径
 const tempDir = os.tmpdir();
+
+// 确保临时目录存在
+if (!fs.existsSync(tempDir)) {
+    try {
+        fs.mkdirSync(tempDir, { recursive: true });
+    } catch (error) {
+        console.error('创建临时目录失败:', error);
+    }
+}
 
 // 配置文件上传
 const storage = multer.diskStorage({
@@ -22,7 +42,12 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ 
+    storage: storage,
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB限制
+    }
+});
 
 async function autoCrop(inputPath) {
     return new Promise((resolve, reject) => {
@@ -126,7 +151,9 @@ app.post('/crop', upload.single('image'), async (req, res) => {
         // 设置响应头
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Content-Length', imageBuffer.length);
-        // 不设置Content-Disposition，让浏览器在页面中显示图片
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         
         console.log('Sending image response');
         // 返回图片
@@ -137,7 +164,9 @@ app.post('/crop', upload.single('image'), async (req, res) => {
         if (req.file && req.file.path) {
             try {
                 fs.unlinkSync(req.file.path);
-            } catch (e) {}
+            } catch (e) {
+                console.error('清理临时文件失败:', e);
+            }
         }
         res.status(500).json({ error: '处理图片时出错' });
     }
@@ -145,10 +174,27 @@ app.post('/crop', upload.single('image'), async (req, res) => {
 
 // 根路径
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    try {
+        const indexPath = path.join(__dirname, 'public', 'index.html');
+        console.log('Serving index.html from:', indexPath);
+        if (fs.existsSync(indexPath)) {
+            res.sendFile(indexPath);
+        } else {
+            console.error('index.html not found');
+            res.status(404).send('File not found');
+        }
+    } catch (error) {
+        console.error('Error serving index.html:', error);
+        res.status(500).send('Internal server error');
+    }
 });
 
-// 导出app供Vercel使用
+// 健康检查
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
+
+// 导出app
 module.exports = app;
 
 // 本地运行时启动服务器

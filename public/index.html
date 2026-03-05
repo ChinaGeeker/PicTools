@@ -256,9 +256,14 @@
             const formData = new FormData();
             formData.append('image', file);
 
-            fetch('/crop', {
+            // 获取当前域名，确保API调用路径正确
+            const apiUrl = '/crop';
+            console.log('API URL:', apiUrl);
+
+            fetch(apiUrl, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                credentials: 'same-origin'
             })
             .then(response => {
                 console.log('Response status:', response.status);
