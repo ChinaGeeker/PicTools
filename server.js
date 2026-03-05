@@ -6,41 +6,54 @@ const os = require('os');
 const PNG = require('pngjs').PNG;
 const app = express();
 
+// 环境信息
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Port:', process.env.PORT);
+console.log('Current directory:', __dirname);
+
 // 配置静态文件目录
-app.use(express.static('public'));
+app.use(express.static('public', {
+    maxAge: 0,
+    setHeaders: (res, path) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+    }
+}));
 
 // 启用CORS
 app.use((req, res, next) => {
+    console.log('Request:', req.method, req.url);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') {
+        console.log('OPTIONS request, returning 200');
         return res.status(200).end();
     }
     next();
 });
 
 // 获取临时目录路径
-const tempDir = os.tmpdir();
+const tempDir = process.env.TMPDIR || process.env.TEMP || os.tmpdir();
+console.log('Temporary directory:', tempDir);
 
 // 确保临时目录存在
 if (!fs.existsSync(tempDir)) {
     try {
         fs.mkdirSync(tempDir, { recursive: true });
+        console.log('Created temporary directory:', tempDir);
     } catch (error) {
         console.error('创建临时目录失败:', error);
+        // 如果无法创建临时目录，使用当前目录
+        tempDir = __dirname;
+        console.log('Falling back to current directory:', tempDir);
     }
 }
 
 // 配置文件上传
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, tempDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
     storage: storage,
@@ -49,22 +62,26 @@ const upload = multer({
     }
 });
 
-async function autoCrop(inputPath) {
+async function autoCrop(buffer) {
     return new Promise((resolve, reject) => {
-        fs.createReadStream(inputPath)
-            .pipe(new PNG())
-            .on('parsed', function() {
+        try {
+            const png = new PNG();
+            png.parse(buffer, (error, data) => {
+                if (error) {
+                    return reject(error);
+                }
+                
                 // 初始化边界
-                let minX = this.width;
-                let minY = this.height;
+                let minX = data.width;
+                let minY = data.height;
                 let maxX = 0;
                 let maxY = 0;
                 
                 // 遍历像素，找到非透明区域的边界
-                for (let y = 0; y < this.height; y++) {
-                    for (let x = 0; x < this.width; x++) {
-                        const idx = (this.width * y + x) << 2;
-                        const alpha = this.data[idx + 3];
+                for (let y = 0; y < data.height; y++) {
+                    for (let x = 0; x < data.width; x++) {
+                        const idx = (data.width * y + x) << 2;
+                        const alpha = data.data[idx + 3];
                         // 检查像素是否非透明（alpha > 0）
                         if (alpha > 0) {
                             minX = Math.min(minX, x);
@@ -90,26 +107,29 @@ async function autoCrop(inputPath) {
                     // 复制裁剪区域的像素
                     for (let y = 0; y < cropHeight; y++) {
                         for (let x = 0; x < cropWidth; x++) {
-                            const srcIdx = (this.width * (minY + y) + (minX + x)) << 2;
+                            const srcIdx = (data.width * (minY + y) + (minX + x)) << 2;
                             const dstIdx = (cropWidth * y + x) << 2;
-                            cropped.data[dstIdx] = this.data[srcIdx];     // R
-                            cropped.data[dstIdx + 1] = this.data[srcIdx + 1]; // G
-                            cropped.data[dstIdx + 2] = this.data[srcIdx + 2]; // B
-                            cropped.data[dstIdx + 3] = this.data[srcIdx + 3]; // A
+                            cropped.data[dstIdx] = data.data[srcIdx];     // R
+                            cropped.data[dstIdx + 1] = data.data[srcIdx + 1]; // G
+                            cropped.data[dstIdx + 2] = data.data[srcIdx + 2]; // B
+                            cropped.data[dstIdx + 3] = data.data[srcIdx + 3]; // A
                         }
                     }
                     
-                    // 保存到临时文件
-                    const outputPath = path.join(tempDir, `cropped_${Date.now()}.png`);
-                    cropped.pack().pipe(fs.createWriteStream(outputPath))
-                        .on('finish', () => resolve(outputPath))
-                        .on('error', reject);
+                    // 转换为buffer
+                    const chunks = [];
+                    const stream = cropped.pack().pipe(require('stream').PassThrough());
+                    stream.on('data', (chunk) => chunks.push(chunk));
+                    stream.on('end', () => resolve(Buffer.concat(chunks)));
+                    stream.on('error', reject);
                 } else {
-                    // 如果没有非透明区域，返回原始文件
-                    resolve(inputPath);
+                    // 如果没有非透明区域，返回原始buffer
+                    resolve(buffer);
                 }
-            })
-            .on('error', reject);
+            });
+        } catch (error) {
+            reject(error);
+        }
     });
 }
 
@@ -122,52 +142,32 @@ app.post('/crop', upload.single('image'), async (req, res) => {
         }
         
         console.log('Uploaded file:', req.file.originalname);
-        console.log('File path:', req.file.path);
+        console.log('File size:', req.file.size);
+        console.log('File type:', req.file.mimetype);
         
-        // 检查文件扩展名
-        const ext = path.extname(req.file.originalname).toLowerCase();
-        if (ext !== '.png') {
-            console.error('Invalid file type:', ext);
-            // 清理临时文件
-            fs.unlinkSync(req.file.path);
+        // 检查文件类型
+        if (req.file.mimetype !== 'image/png') {
+            console.error('Invalid file type:', req.file.mimetype);
             return res.status(400).json({ error: '请选择PNG格式的图片' });
         }
         
         // 裁剪图片
         console.log('Starting crop process');
-        const outputPath = await autoCrop(req.file.path);
-        console.log('Crop completed, output path:', outputPath);
-        
-        // 读取裁剪后的图片
-        const imageBuffer = fs.readFileSync(outputPath);
-        console.log('Image buffer size:', imageBuffer.length);
-        
-        // 清理临时文件
-        fs.unlinkSync(req.file.path);
-        if (outputPath !== req.file.path) {
-            fs.unlinkSync(outputPath);
-        }
+        const croppedBuffer = await autoCrop(req.file.buffer);
+        console.log('Crop completed, buffer size:', croppedBuffer.length);
         
         // 设置响应头
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Length', imageBuffer.length);
+        res.setHeader('Content-Length', croppedBuffer.length);
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
         
         console.log('Sending image response');
         // 返回图片
-        res.send(imageBuffer);
+        res.send(croppedBuffer);
     } catch (error) {
         console.error('处理图片时出错:', error);
-        // 尝试清理临时文件
-        if (req.file && req.file.path) {
-            try {
-                fs.unlinkSync(req.file.path);
-            } catch (e) {
-                console.error('清理临时文件失败:', e);
-            }
-        }
         res.status(500).json({ error: '处理图片时出错' });
     }
 });
@@ -191,7 +191,24 @@ app.get('/', (req, res) => {
 
 // 健康检查
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok' });
+    console.log('Health check requested');
+    res.status(200).json({ 
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// 404处理
+app.use((req, res) => {
+    console.log('404:', req.method, req.url);
+    res.status(404).json({ error: 'Not found' });
+});
+
+// 错误处理中间件
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
 });
 
 // 导出app
