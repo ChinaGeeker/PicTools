@@ -260,22 +260,29 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // 显示裁剪后的图片
-                    croppedImage.src = data.imageUrl + '?t=' + new Date().getTime();
-                    croppedImage.style.display = 'block';
-                    document.getElementById('croppedPlaceholder').querySelector('.placeholder-content').style.display = 'none';
-                    
-                    // 更新下载按钮
-                    downloadBtn.href = data.imageUrl;
-                    downloadBtn.style.display = 'inline-block';
-                    
-                    showMessage('图片裁剪成功！', 'success');
-                } else {
-                    showMessage(data.error, 'error');
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || '处理失败');
+                    });
                 }
+                return response.blob();
+            })
+            .then(blob => {
+                // 创建图片URL
+                const imageUrl = URL.createObjectURL(blob);
+                
+                // 显示裁剪后的图片
+                croppedImage.src = imageUrl;
+                croppedImage.style.display = 'block';
+                document.getElementById('croppedPlaceholder').querySelector('.placeholder-content').style.display = 'none';
+                
+                // 更新下载按钮
+                downloadBtn.href = imageUrl;
+                downloadBtn.download = `cropped_${Date.now()}.png`;
+                downloadBtn.style.display = 'inline-block';
+                
+                showMessage('图片裁剪成功！', 'success');
             })
             .catch(error => {
                 console.error('上传失败:', error);

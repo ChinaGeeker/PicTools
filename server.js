@@ -2,18 +2,20 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const PNG = require('pngjs').PNG;
 const app = express();
-const port = 3000;
 
 // 配置静态文件目录
 app.use(express.static('public'));
-app.use('/output', express.static('output'));
+
+// 获取临时目录路径
+const tempDir = os.tmpdir();
 
 // 配置文件上传
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/');
+        cb(null, tempDir);
     },
     filename: function (req, file, cb) {
         cb(null, Date.now() + path.extname(file.originalname));
@@ -22,17 +24,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// 确保上传目录存在
-if (!fs.existsSync('uploads')) {
-    fs.mkdirSync('uploads');
-}
-
-// 确保输出目录存在
-if (!fs.existsSync('output')) {
-    fs.mkdirSync('output');
-}
-
-async function autoCrop(inputPath, outputPath) {
+async function autoCrop(inputPath) {
     return new Promise((resolve, reject) => {
         fs.createReadStream(inputPath)
             .pipe(new PNG())
@@ -82,16 +74,14 @@ async function autoCrop(inputPath, outputPath) {
                         }
                     }
                     
-                    // 保存裁剪后的图片
+                    // 保存到临时文件
+                    const outputPath = path.join(tempDir, `cropped_${Date.now()}.png`);
                     cropped.pack().pipe(fs.createWriteStream(outputPath))
-                        .on('finish', resolve)
+                        .on('finish', () => resolve(outputPath))
                         .on('error', reject);
                 } else {
-                    // 如果没有非透明区域，直接复制原始图片
-                    fs.copyFile(inputPath, outputPath, (err) => {
-                        if (err) reject(err);
-                        else resolve();
-                    });
+                    // 如果没有非透明区域，返回原始文件
+                    resolve(inputPath);
                 }
             })
             .on('error', reject);
@@ -107,24 +97,45 @@ app.post('/crop', upload.single('image'), async (req, res) => {
         // 检查文件扩展名
         const ext = path.extname(req.file.originalname).toLowerCase();
         if (ext !== '.png') {
+            // 清理临时文件
+            fs.unlinkSync(req.file.path);
             return res.status(400).json({ error: '请选择PNG格式的图片' });
         }
         
-        // 保存裁剪后的图片
-        const outputPath = path.join('output', `cropped_${Date.now()}${ext}`);
-        await autoCrop(req.file.path, outputPath);
+        // 裁剪图片
+        const outputPath = await autoCrop(req.file.path);
         
-        // 删除上传的临时文件
+        // 读取裁剪后的图片
+        const imageBuffer = fs.readFileSync(outputPath);
+        
+        // 清理临时文件
         fs.unlinkSync(req.file.path);
+        if (outputPath !== req.file.path) {
+            fs.unlinkSync(outputPath);
+        }
         
-        // 返回裁剪后的图片路径
-        res.json({ success: true, imageUrl: `/output/${path.basename(outputPath)}` });
+        // 设置响应头
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `attachment; filename=cropped_${Date.now()}.png`);
+        
+        // 返回图片
+        res.send(imageBuffer);
     } catch (error) {
         console.error('处理图片时出错:', error);
+        // 尝试清理临时文件
+        if (req.file && req.file.path) {
+            try {
+                fs.unlinkSync(req.file.path);
+            } catch (e) {}
+        }
         res.status(500).json({ error: '处理图片时出错' });
     }
 });
 
-app.listen(port, () => {
-    console.log(`服务器运行在 http://localhost:${port}`);
+// 根路径
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// 导出app供Vercel使用
+module.exports = app;
