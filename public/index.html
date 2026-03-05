@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>图片自动裁剪工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .drop-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .drop-area:hover {
+            border-color: #4CAF50;
+            background-color: #f9f9f9;
+        }
+        .drop-area.active {
+            border-color: #4CAF50;
+            background-color: #e8f5e8;
+        }
+        .drop-area p {
+            margin: 10px 0;
+            color: #666;
+        }
+        .upload-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .upload-btn:hover {
+            background-color: #45a049;
+        }
+        #fileInput {
+            display: none;
+        }
+        .preview-section {
+            margin: 20px 0;
+        }
+        .image-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+        .image-box {
+            text-align: center;
+        }
+        img {
+            max-width: 300px;
+            max-height: 300px;
+            border: 1px solid #ddd;
+            margin: 10px 0;
+        }
+        .image-placeholder {
+            width: 300px;
+            height: 300px;
+            border: 1px dashed #ddd;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f9f9f9;
+            margin: 10px 0;
+            position: relative;
+        }
+        .placeholder-content {
+            text-align: center;
+            color: #999;
+        }
+        .image-placeholder img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border: none;
+            margin: 0;
+            border-radius: 4px;
+        }
+        .result-section {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .download-btn {
+            padding: 10px 20px;
+            background-color: #008CBA;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .download-btn:hover {
+            background-color: #0073aa;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,.3);
+            border-radius: 50%;
+            border-top-color: #4CAF50;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>图片自动裁剪工具</h1>
+        
+        <div class="drop-area" id="dropArea">
+            <p>将PNG图片拖放到这里，或者</p>
+            <label for="fileInput" class="upload-btn">选择文件</label>
+            <input type="file" id="fileInput" accept=".png">
+            <p>支持PNG格式图片</p>
+        </div>
+        
+        <div class="preview-section">
+            <div class="image-container">
+                <div class="image-box">
+                    <h3>原始图片</h3>
+                    <div class="image-placeholder" id="originalPlaceholder">
+                        <img id="originalImage" src="" alt="原始图片" style="display: none;">
+                        <div class="placeholder-content">
+                            <p>请上传PNG图片</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="image-box">
+                    <h3>裁剪后</h3>
+                    <div class="image-placeholder" id="croppedPlaceholder">
+                        <img id="croppedImage" src="" alt="裁剪后图片" style="display: none;">
+                        <div class="placeholder-content">
+                            <p>裁剪结果将显示在这里</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <a id="downloadBtn" class="download-btn" href="" download style="display: none;">下载裁剪后的图片</a>
+            <div id="message" class="message"></div>
+        </div>
+    </div>
+
+    <script>
+        const dropArea = document.getElementById('dropArea');
+        const fileInput = document.getElementById('fileInput');
+        const originalImage = document.getElementById('originalImage');
+        const croppedImage = document.getElementById('croppedImage');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const message = document.getElementById('message');
+
+        // 拖放事件处理
+        dropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropArea.classList.add('active');
+        });
+
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.classList.remove('active');
+        });
+
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('active');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        // 点击选择文件
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        // 点击拖放区域选择文件
+        dropArea.addEventListener('click', (e) => {
+            // 检查点击的是否是上传按钮或文件输入框
+            if (e.target.classList.contains('upload-btn') || e.target.id === 'fileInput') {
+                return; // 避免重复触发
+            }
+            // 重置fileInput的value，确保每次点击都能触发change事件
+            fileInput.value = '';
+            // 触发文件选择对话框
+            fileInput.click();
+        });
+
+        function handleFile(file) {
+            if (file.type !== 'image/png') {
+                showMessage('请选择PNG格式的图片', 'error');
+                return;
+            }
+
+            // 预览原始图片
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                originalImage.src = e.target.result;
+                originalImage.style.display = 'block';
+                document.getElementById('originalPlaceholder').querySelector('.placeholder-content').style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+
+            showMessage('<div class="loading"></div> 正在处理图片...', 'success');
+
+            // 上传文件并裁剪
+            const formData = new FormData();
+            formData.append('image', file);
+
+            fetch('/crop', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 显示裁剪后的图片
+                    croppedImage.src = data.imageUrl + '?t=' + new Date().getTime();
+                    croppedImage.style.display = 'block';
+                    document.getElementById('croppedPlaceholder').querySelector('.placeholder-content').style.display = 'none';
+                    
+                    // 更新下载按钮
+                    downloadBtn.href = data.imageUrl;
+                    downloadBtn.style.display = 'inline-block';
+                    
+                    showMessage('图片裁剪成功！', 'success');
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('上传失败:', error);
+                showMessage('上传失败，请重试', 'error');
+            });
+        }
+
+        function showMessage(text, type) {
+            message.innerHTML = text;
+            message.className = `message ${type}`;
+        }
+    </script>
+</body>
+</html>

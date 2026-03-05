@@ -1,0 +1,25 @@
+# 依赖目录
+node_modules/
+
+# 上传和输出目录
+uploads/
+output/
+userData/
+
+# 日志文件
+*.log
+
+# 环境变量文件
+.env
+
+# 编辑器配置文件
+.vscode/
+.idea/
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
+
+# 临时文件
+*.tmp
+*.temp
