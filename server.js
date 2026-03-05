@@ -90,23 +90,32 @@ async function autoCrop(inputPath) {
 
 app.post('/crop', upload.single('image'), async (req, res) => {
     try {
+        console.log('Received crop request');
         if (!req.file) {
+            console.error('No file uploaded');
             return res.status(400).json({ error: '请选择图片' });
         }
+        
+        console.log('Uploaded file:', req.file.originalname);
+        console.log('File path:', req.file.path);
         
         // 检查文件扩展名
         const ext = path.extname(req.file.originalname).toLowerCase();
         if (ext !== '.png') {
+            console.error('Invalid file type:', ext);
             // 清理临时文件
             fs.unlinkSync(req.file.path);
             return res.status(400).json({ error: '请选择PNG格式的图片' });
         }
         
         // 裁剪图片
+        console.log('Starting crop process');
         const outputPath = await autoCrop(req.file.path);
+        console.log('Crop completed, output path:', outputPath);
         
         // 读取裁剪后的图片
         const imageBuffer = fs.readFileSync(outputPath);
+        console.log('Image buffer size:', imageBuffer.length);
         
         // 清理临时文件
         fs.unlinkSync(req.file.path);
@@ -116,8 +125,10 @@ app.post('/crop', upload.single('image'), async (req, res) => {
         
         // 设置响应头
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Disposition', `attachment; filename=cropped_${Date.now()}.png`);
+        res.setHeader('Content-Length', imageBuffer.length);
+        // 不设置Content-Disposition，让浏览器在页面中显示图片
         
+        console.log('Sending image response');
         // 返回图片
         res.send(imageBuffer);
     } catch (error) {
@@ -139,3 +150,11 @@ app.get('/', (req, res) => {
 
 // 导出app供Vercel使用
 module.exports = app;
+
+// 本地运行时启动服务器
+if (require.main === module) {
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(`服务器运行在 http://localhost:${port}`);
+    });
+}

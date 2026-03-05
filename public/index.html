@@ -261,16 +261,26 @@
                 body: formData
             })
             .then(response => {
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers.get('content-type'));
                 if (!response.ok) {
                     return response.json().then(data => {
+                        console.error('Error data:', data);
                         throw new Error(data.error || '处理失败');
+                    }).catch(() => {
+                        throw new Error('服务器返回错误');
                     });
                 }
                 return response.blob();
             })
             .then(blob => {
+                console.log('Received blob:', blob);
+                console.log('Blob size:', blob.size);
+                console.log('Blob type:', blob.type);
+                
                 // 创建图片URL
                 const imageUrl = URL.createObjectURL(blob);
+                console.log('Created image URL:', imageUrl);
                 
                 // 显示裁剪后的图片
                 croppedImage.src = imageUrl;
